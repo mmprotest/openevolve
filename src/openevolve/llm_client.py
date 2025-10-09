@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Protocol, Sequence
 
 import httpx
 
@@ -13,6 +13,25 @@ from .config import OpenEvolveSettings, load_settings
 from .utils import ensure_event_loop
 
 DiffValidator = Callable[[str], bool]
+
+
+class LLMClientProtocol(Protocol):
+    """Typed protocol implemented by language model clients."""
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        system: str,
+        model: str | None = None,
+        n: int = 1,
+        temperature: float = 0.7,
+        extra_messages: Sequence[dict[str, Any]] | None = None,
+    ) -> "GenerationResult":
+        """Return candidate diff patches for the supplied prompt."""
+
+    async def aclose(self) -> None:
+        """Close any underlying network resources."""
 
 
 @dataclass
@@ -23,7 +42,7 @@ class GenerationResult:
     raw_response: dict[str, Any] | None = None
 
 
-class OpenEvolveClient:
+class OpenEvolveClient(LLMClientProtocol):
     """Client for interacting with OpenAI compatible chat completion APIs."""
 
     def __init__(

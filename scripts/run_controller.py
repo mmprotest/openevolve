@@ -40,7 +40,8 @@ def main() -> None:
 
     import asyncio
 
-    asyncio.run(controller.evolve_once(task))
+    metrics = asyncio.run(controller.evolve_once(task))
+    print(f"Accepted candidate metrics: {metrics}")
 
 
 if __name__ == "__main__":

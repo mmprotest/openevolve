@@ -17,12 +17,64 @@ progressively improve candidate programs.
 ## Installation
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
-## Configuration
+## Quickstart (offline demo)
 
-Environment variables follow the naming convention used by `pydantic` settings.  The most relevant options are:
+You can exercise the full evolution loop without an API key by running the deterministic
+demo. It copies the toy task into `runs/toy_sum_squares_demo.py`, applies a handcrafted diff,
+and prints the resulting metrics and program.
+
+```bash
+python scripts/offline_demo.py
+```
+
+Example output:
+
+```
+Accepted metrics: {'correct': 1.0}
+Updated program saved to: /path/to/openevolve/runs/toy_sum_squares_demo.py
+
+--- Updated Program ---
+
+"""Toy task for evolving sum of squares."""
+
+from __future__ import annotations
+
+
+def sum_of_squares(values: list[int]) -> int:
+    """Compute the sum of squared elements."""
+
+    # EVOLVE-BLOCK-START sum_of_squares
+    return sum(value * value for value in values)
+    # EVOLVE-BLOCK-END
+```
+
+## Running with a model endpoint
+
+Set your API credentials (or point to a local OpenAI-compatible deployment) and start the
+controller on one of the bundled tasks:
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8000/v1
+export OPENAI_API_KEY=sk-your-token
+python scripts/run_controller.py --task speed_sort
+```
+
+All accepted candidates and evaluations are recorded in a SQLite database under `runs/`.
+Inspect the archive to analyse Pareto fronts and metric history:
+
+```bash
+python scripts/inspect_db.py --db-path runs/speed_sort.sqlite
+```
+
+## Configuration reference
+
+Environment variables follow the naming convention used by `pydantic` settings. The most
+relevant options are:
 
 | Variable | Description | Default |
 | --- | --- | --- |
@@ -31,26 +83,8 @@ Environment variables follow the naming convention used by `pydantic` settings. 
 | `OPENEVOLVE_MODEL_PRIMARY` | Primary model identifier. | `gpt-4.1` |
 | `OPENEVOLVE_MODEL_SECONDARY` | Optional secondary model for ensembles. | `gpt-4o-mini` |
 
-Example local configuration:
-
-```bash
-export OPENAI_BASE_URL=http://localhost:8000/v1
-export OPENAI_API_KEY=sk-local-placeholder
-```
-
-## Usage
-
-Run the evolutionary controller against the bundled tasks:
-
-```bash
-python scripts/run_controller.py --task speed_sort
-```
-
-Inspect the on-disk database archive to monitor progress:
-
-```bash
-python scripts/inspect_db.py --db-path runs/speed_sort.sqlite
-```
+Additional knobs such as concurrency and novelty thresholds can be found in
+`openevolve.config.OpenEvolveSettings`.
 
 ## Tasks
 
