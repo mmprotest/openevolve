@@ -15,6 +15,8 @@ for entry in (ROOT, SRC):
     if entry_str not in sys.path:
         sys.path.insert(0, entry_str)
 
+from typing import Mapping
+
 from openevolve.controller import EvolutionController, EvolutionTask
 from tasks.algorithmic_optimization.evaluate import evaluate
 
@@ -55,6 +57,14 @@ def _parse_args() -> argparse.Namespace:
         help="Maximum number of language-model rounds to attempt before giving up (default: 3).",
     )
     parser.add_argument(
+        "--full-search",
+        action="store_true",
+        help=(
+            "Evaluate every requested round and candidate instead of stopping at the first viable mutation. "
+            "Returns the best-scoring program after the search completes."
+        ),
+    )
+    parser.add_argument(
         "--system-prompt",
         help="Optional system prompt override sent to the model when mutating the EVOLVE block.",
     )
@@ -70,6 +80,16 @@ def _print_metrics(title: str, metrics: dict[str, float]) -> None:
     print(title)
     for name, value in metrics.items():
         print(f"  {name:>12}: {value:.4f}")
+
+
+def _score_metrics(metrics: Mapping[str, float]) -> float:
+    """Combine metrics to reward accuracy and penalise latency/length."""
+
+    accuracy = metrics.get("accuracy", 0.0)
+    time_ms = metrics.get("time_ms", 0.0)
+    code_length = metrics.get("code_length", 0.0)
+    # Weight accuracy heavily to ensure correctness dominates the objective.
+    return accuracy * 1_000 - time_ms - code_length
 
 
 def main() -> None:
@@ -88,6 +108,7 @@ def main() -> None:
             description=args.description,
             program_path=candidate_program,
             evaluation=evaluate,
+            scoring=_score_metrics,
         )
         controller = EvolutionController(
             model=args.model,
@@ -95,8 +116,14 @@ def main() -> None:
             candidates=args.candidates,
             max_rounds=args.rounds,
             system_prompt=args.system_prompt or EvolutionController.DEFAULT_SYSTEM_PROMPT,
+            stop_on_first=not args.full_search,
         )
-        improved_metrics = asyncio.run(controller.evolve_once(task))
+        improved_metrics = asyncio.run(
+            controller.evolve_once(
+                task,
+                stop_on_first=not args.full_search,
+            )
+        )
 
         _print_metrics("\nImproved candidate metrics:", dict(improved_metrics))
 

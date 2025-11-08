@@ -1,0 +1,2 @@
+[console_scripts]
+openevolve = openevolve.cli:main

@@ -19,6 +19,7 @@ class EvolutionTask:
     description: str
     program_path: Path
     evaluation: Callable[[str], Mapping[str, float]]
+    scoring: Callable[[Mapping[str, float]], float] | None = None
 
 
 class EvolutionController:
@@ -36,6 +37,7 @@ class EvolutionController:
         max_rounds: int = 1,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         fail_on_no_candidate: bool = False,
+        stop_on_first: bool = True,
     ) -> None:
         self.settings = load_settings()
         self.client: LLMClientProtocol = client or build_default_client()
@@ -45,6 +47,7 @@ class EvolutionController:
         self._max_rounds = max(1, max_rounds)
         self._system_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
         self._fail_on_no_candidate = fail_on_no_candidate
+        self._stop_on_first = stop_on_first
 
     async def evolve_once(
         self,
@@ -57,6 +60,7 @@ class EvolutionController:
         system_prompt: str | None = None,
         extra_messages: Sequence[dict[str, Any]] | None = None,
         fail_on_no_candidate: bool | None = None,
+        stop_on_first: bool | None = None,
     ) -> Mapping[str, float]:
         source = task.program_path.read_text()
         blocks = extract_blocks(source)
@@ -64,11 +68,9 @@ class EvolutionController:
             raise RuntimeError("No EVOLVE blocks found in program")
         block = blocks[0]
 
-        prompt = build_prompt(task_description=task.description, block_source=block.content)
-
         baseline_metrics = dict(task.evaluation(source))
-        accepted_metrics: dict[str, float] | None = None
         fail_if_empty = self._fail_on_no_candidate if fail_on_no_candidate is None else fail_on_no_candidate
+        stop_immediately = self._stop_on_first if stop_on_first is None else stop_on_first
 
         chosen_model = model if model is not None else self._model
         chosen_temperature = temperature if temperature is not None else self._temperature
@@ -76,7 +78,23 @@ class EvolutionController:
         rounds = max(1, max_rounds if max_rounds is not None else self._max_rounds)
         system = system_prompt or self._system_prompt
 
+        if task.scoring is not None:
+            baseline_score = task.scoring(baseline_metrics)
+        else:
+            baseline_score = 0.0
+        best_score = baseline_score
+        best_metrics: Mapping[str, float] = baseline_metrics
+        best_program = source
+        score_counter = baseline_score
+
+        current_source = source
+        current_block = block
+
         for _ in range(rounds):
+            prompt = build_prompt(
+                task_description=task.description,
+                block_source=current_block.content,
+            )
             try:
                 result = await self.client.generate(
                     prompt=prompt,
@@ -89,30 +107,51 @@ class EvolutionController:
             except Exception:  # noqa: BLE001
                 continue
 
+            prompt_source = current_source
+            prompt_block = current_block
+
             for diff_text in result.candidates:
                 try:
                     validate_model_response(diff_text)
                     hunks = parse_diff(diff_text)
-                    new_source = apply_diff(block.content, hunks)
+                    new_source = apply_diff(prompt_block.content, hunks)
                 except ValueError:
                     continue
 
-                updated_program = replace_block(source, block, new_source)
+                updated_program = replace_block(prompt_source, prompt_block, new_source)
                 try:
                     metrics = dict(task.evaluation(updated_program))
                 except Exception:  # noqa: BLE001
                     continue
-                if metrics:
-                    task.program_path.write_text(updated_program)
-                    accepted_metrics = metrics
-                    break
-            if accepted_metrics is not None:
-                break
+                if not metrics:
+                    continue
 
-        if accepted_metrics is None:
+                if stop_immediately:
+                    task.program_path.write_text(updated_program)
+                    return metrics
+
+                if task.scoring is not None:
+                    candidate_score = task.scoring(metrics)
+                else:
+                    score_counter += 1.0
+                    candidate_score = score_counter
+
+                if candidate_score > best_score:
+                    best_score = candidate_score
+                    best_metrics = metrics
+                    best_program = updated_program
+
+            current_source = best_program
+            blocks = extract_blocks(current_source)
+            if not blocks:
+                raise RuntimeError("No EVOLVE blocks found in updated program")
+            current_block = blocks[0]
+
+        if best_score == baseline_score:
             if fail_if_empty:
                 raise RuntimeError("No candidate diff produced an improved program")
             task.program_path.write_text(source)
             return baseline_metrics
 
-        return accepted_metrics
+        task.program_path.write_text(best_program)
+        return best_metrics
