@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -82,6 +83,12 @@ def _parse_args() -> argparse.Namespace:
         default=TASK_DESCRIPTION,
         help="Custom task description passed to the model.",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Logging level for the evolution controller (default: INFO).",
+    )
     return parser.parse_args()
 
 
@@ -104,6 +111,11 @@ def _score_metrics(metrics: Mapping[str, float]) -> float:
 def main() -> None:
     args = _parse_args()
 
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     baseline_source = PROGRAM_PATH.read_text(encoding="utf-8")
     baseline_metrics = evaluate(baseline_source)
     _print_metrics("Baseline bubble sort metrics:", dict(baseline_metrics))
@@ -125,6 +137,7 @@ def main() -> None:
             max_rounds=args.rounds,
             system_prompt=args.system_prompt or EvolutionController.DEFAULT_SYSTEM_PROMPT,
             stop_on_first=not args.full_search,
+            logger=logging.getLogger("openevolve.controller"),
         )
 
         current_source = baseline_source
