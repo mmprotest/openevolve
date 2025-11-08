@@ -1,188 +1,331 @@
 # OpenEvolve
 
-OpenEvolve is a research-oriented framework that explores large-language-model-driven evolutionary programming.  
-The system focuses on evolving algorithmic building blocks inside explicit `EVOLVE` regions of source files.  
-It combines structured prompting, diff-based editing, multi-stage evaluation cascades, and Pareto-guided search to 
-progressively improve candidate programs.
+OpenEvolve is an end-to-end playground for evolving Python programs with large language
+models. It combines long-context prompting, SQLite persistence, meta-prompt evolution,
+and multi-objective selection so you can watch code improve generation after generation.
+This README walks you through the whole system in painstaking detail—no prior experience
+with evolutionary search, LLM tooling, or this repository is required.
 
-## Features
+---
 
-- **LLM guided evolution** – structured prompts request SEARCH/REPLACE diffs that are applied to annotated blocks.
-- **Configurable model endpoint** – works with OpenAI hosted models as well as local deployments (vLLM, Ollama, LM Studio) via an OpenAI-compatible REST interface.
-- **Cascaded evaluation** – tasks may expose multiple evaluation stages to filter candidates with fast checks before expensive scoring.
-- **Pareto dominance and novelty** – selection balances multi-objective optimization with behavioural diversity.
-- **Safety aware sandbox** – candidate programs execute in a constrained subprocess with limited resources.
-- **Plugin-style tasks** – new optimisation problems can be added under the `tasks/` directory.
+## Table of contents
 
-## Installation
+1. [Before you start](#before-you-start)
+2. [Five minute quick start](#five-minute-quick-start)
+3. [Running the Algorithmic Optimization demo](#running-the-algorithmic-optimization-demo)
+4. [Using your own (or a local) OpenAI-compatible model](#using-your-own-or-a-local-openai-compatible-model)
+5. [Understanding the architecture](#understanding-the-architecture)
+6. [Configuration cheat sheet](#configuration-cheat-sheet)
+7. [Inspecting results, artifacts, and logs](#inspecting-results-artifacts-and-logs)
+8. [Troubleshooting & FAQ](#troubleshooting--faq)
+9. [Developer workflow](#developer-workflow)
+10. [License](#license)
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
+---
 
-## Quickstart
+## Before you start
 
-OpenEvolve ships with a CLI that orchestrates the new persistent evolution engine. The
-default configuration uses a deterministic echo "LLM" so you can experiment without
-network access or API keys.
+Follow this checklist to ensure nothing surprises you later:
 
-```bash
-pip install -e .
-openevolve init-db --db .openevolve/openevolve.db
-openevolve run --config configs/demo_math.yml --run-id demo
-```
-
-The command above will evolve the toy sum-of-squares task for two generations, logging
-artifacts under `runs/demo/`. Inspect the resulting candidates and metrics:
-
-```bash
-openevolve inspect --run-id demo --top 5
-openevolve export-archive --run-id demo --out artifacts/demo.json
-```
-
-To continue a previous run, reuse the same run identifier:
-
-```bash
-openevolve resume --run-id demo
-```
-
-If you want the CLI to stream a static diff rather than mutating code, set
-`llm.mode: echo` with a `response` string in the YAML configuration. Switching to a real
-provider only requires adding credentials via `OpenEvolveSettings` environment variables
-and updating the `llm` section. Use `llm.mode: openai` to call any OpenAI-compatible
-endpoint (including local deployments) and optionally supply `base_url`, `api_key`, and
-`model` overrides directly in the YAML file.
-
-### Evolution loop overview
-
-```mermaid
-flowchart LR
-    subgraph meta[Meta Prompt Population]
-        mp1[Template A]
-        mp2[Template B]
-    end
-    meta --> prompt[PromptSampler]
-    prompt --> llm[LLM call]
-    llm --> apply[Patch apply & snapshot]
-    apply --> cascade[Evaluator cascade]
-    cascade --> db[(ProgramDB)]
-    db --> archive[Pareto + novelty archive]
-    archive -->|fitness attribution| meta
-```
-
-## Core components
-
-- **ProgramDB (`openevolve.db`)** – stores runs, candidates, meta-prompts, and evaluation
-  history in SQLite. The schema is automatically created on first use and supports
-  inspection from the CLI.
-- **PromptSampler (`openevolve.prompt_sampler`)** – assembles long-context prompts that mix
-  elites, novelty exemplars, and recent failures while respecting token budgets.
-- **Meta-prompt evolution (`openevolve.meta_prompt`)** – maintains a small population of
-  instruction templates that co-evolve with program candidates and receive fitness
-  updates based on downstream performance.
-- **Evaluator cascade (`openevolve.evaluators`)** – runs pluggable evaluators in parallel
-  with timeouts, retries, and optional early cancellation on failure.
-- **Selection & archive (`openevolve.selection`)** – implements Pareto ranking, novelty
-  search, and candidate ageing. The archive exposes mixture sampling for future
-  generations.
-- **Apply engine (`openevolve.apply`)** – safely applies JSON or unified diffs to EVOLVE
-  blocks or whole files with automatic revert on failure.
-- **Visualization (`openevolve.viz`)** – produces Pareto scatter plots given a run ID. The
-  dependency on `matplotlib` is optional and only required when plotting.
-
-## Running with a model endpoint
-
-Set your API credentials (or point to a local OpenAI-compatible deployment) and start the
-legacy controller for backwards compatibility:
-
-```bash
-export OPENAI_BASE_URL=http://localhost:8000/v1
-export OPENAI_API_KEY=sk-your-token
-python scripts/run_controller.py --task speed_sort
-```
-
-The new engine exposes the same functionality via the CLI – set
-`llm.mode: noop` and supply a callable when embedding the engine inside another
-application. To point at a hosted or local OpenAI-compatible endpoint directly from YAML,
-add a block like the following:
-
-```yaml
-llm:
-  mode: "openai"
-  api_key: "sk-your-token"
-  base_url: "http://localhost:8000/v1"
-  model: "gpt-4.1-mini"
-  temperature: 0.6
-```
-
-## Configuration reference
-
-Environment variables follow the naming convention used by `pydantic` settings. The most
-relevant options are:
-
-| Variable | Description | Default |
+| Step | What you need to do | Why it matters |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | API key for remote model providers. | `None` |
-| `OPENAI_BASE_URL` | Base URL for the REST API. | `https://api.openai.com/v1` |
-| `OPENEVOLVE_MODEL_PRIMARY` | Primary model identifier. | `gpt-4.1` |
-| `OPENEVOLVE_MODEL_SECONDARY` | Optional secondary model for ensembles. | `gpt-4o-mini` |
+| 1 | Install **Python 3.11 or newer** (`python3 --version`). | Older interpreters miss required stdlib features. |
+| 2 | Ensure **Git** is installed (`git --version`). | The engine checks out and rewinds files between generations. |
+| 3 | Optionally export `OPENAI_API_KEY` and `OPENAI_BASE_URL`. | Needed if you plan to call a remote or self-hosted LLM. |
+| 4 | Decide on a working directory with at least **1 GB** of free space. | Evolution writes logs, SQLite databases, and code snapshots per run. |
 
-Additional knobs such as concurrency and novelty thresholds can be found in
-`openevolve.config.OpenEvolveSettings`.
+If any of the commands above fail, install the missing dependency before continuing.
 
-The YAML configuration loader (`openevolve.config.load_config`) understands the options in
-`configs/default.yml`. Key sections include:
+---
 
-- `task`: description and target file to mutate (relative to the configured workdir).
-- `sampler`: prompt assembly parameters such as token budget and context counts.
-- `cascade`: evaluator definitions and parallelism controls.
-- `meta_prompt`: population size and mutation probability for meta-instructions.
-- `archive`: capacity and novelty neighbourhood size.
-- `evolution`: patch scope (`blocks` or `wholefile`) and safe revert behaviour.
+## Five minute quick start
 
-## Tasks
+This is the fastest path from zero to seeing OpenEvolve mutate code. Every command is
+copy-paste ready.
 
-Three demonstration tasks ship with the repository:
+1. **Clone and enter the repository.**
+   ```bash
+   git clone https://github.com/mmprotest/openevolve.git
+   cd openevolve
+   ```
 
-- `toy_sum_squares` – evolve a simple numerical routine.
-- `speed_sort` – target faster array sorting heuristics.
-- `algorithmic_optimization` – mutate a bubble-sort baseline toward faster insertion-style
-  heuristics while balancing runtime and brevity.
+2. **Create and activate a virtual environment.**
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-Each task exposes an `evaluate` function returning a dictionary of metrics and can be
-extended with additional tests. The new `configs/algorithmic_optimization.yml` profile
-demonstrates a multi-objective Pareto run. For a quick standalone comparison without the
-full engine, run `python examples/algorithmic_optimization.py` to see how the metrics shift
-between the baseline bubble sort and an insertion-sort variant.
+3. **Install OpenEvolve in editable mode.**
+   ```bash
+   pip install -e .
+   ```
+   This pulls in the light dependency set (`pyyaml`, `tqdm`, and optional `matplotlib`).
 
-## Testing
+4. **Initialize the SQLite database once.**
+   ```bash
+   openevolve init-db --db .openevolve/openevolve.db
+   ```
+   The command creates `.openevolve/` if it does not already exist and applies
+   `src/openevolve/schema.sql`.
 
-Run the formatting, linting, and test suite:
+5. **Launch a canned two-generation demo run.**
+   ```bash
+   openevolve run --config configs/demo_math.yml --run-id demo
+   ```
+   The demo uses an internal echo LLM so you do **not** need any credentials. Expect the
+   run to finish in under 30 seconds and write artifacts to `runs/demo/`.
+
+6. **Inspect what just happened.**
+   ```bash
+   openevolve inspect --run-id demo --top 5
+   openevolve export-archive --run-id demo --out artifacts/demo_archive.json
+   openevolve viz --run-id demo --metric-axes accuracy,time_ms
+   ```
+   - `inspect` prints the top candidates and their metrics.
+   - `export-archive` writes the Pareto archive as JSON for downstream analysis.
+   - `viz` generates `artifacts/demo_pareto.png` (requires `matplotlib`).
+
+7. **Resume the same run later.**
+   ```bash
+   openevolve resume --run-id demo
+   ```
+   The engine reads the last completed generation from the database and continues.
+
+That’s it—you have run the full pipeline end to end.
+
+---
+
+## Running the Algorithmic Optimization demo
+
+The repository ships with a multi-objective showcase that evolves a bubble sort baseline
+toward faster, shorter insertion-style variants while preserving correctness. It highlights
+Pareto optimisation across **accuracy**, **execution time**, and **code length**.
+
+### Step-by-step
+
+1. **Review the task definition.**
+   - Source: `tasks/algorithmic_optimization/program.py`
+   - Evaluators: `tasks/algorithmic_optimization/evaluate.py`
+   - Config: `configs/algorithmic_optimization.yml`
+
+2. **Execute the standalone example script (optional).**
+   ```bash
+   python examples/algorithmic_optimization.py
+   ```
+   This compares the baseline bubble sort against a hand-crafted insertion sort and prints
+   the metrics we optimise for during evolution.
+
+3. **Run the evolutionary loop.**
+   ```bash
+   openevolve run --config configs/algorithmic_optimization.yml --run-id algo-demo
+   ```
+   Expect a longer run (several minutes) because evaluators measure runtime repeatedly.
+
+4. **Inspect results and the Pareto front.**
+   ```bash
+   openevolve inspect --run-id algo-demo --top 10
+   openevolve viz --run-id algo-demo --metric-axes accuracy,time_ms,code_size
+   ```
+   The `viz` command produces a scatter plot showing how candidates trade accuracy for
+   speed and brevity. Check `runs/algo-demo/` for detailed logs, patches, and evaluator
+   summaries per generation.
+
+5. **Resume or branch off.**
+   Use `openevolve resume --run-id algo-demo` to continue training, or copy the run
+   directory and database entries to start a new variant with tweaked parameters.
+
+---
+
+## Using your own (or a local) OpenAI-compatible model
+
+OpenEvolve speaks the OpenAI Chat Completions protocol. You can point it to OpenAI’s
+hosted endpoints or any local deployment that mimics the API (for example, vLLM,
+Ollama, LM Studio, or Text Generation Web UI).
+
+1. **Pick a configuration file.**
+   Edit one of the YAML configs (e.g. `configs/default.yml`) and locate the `llm` block.
+
+2. **Fill in the connection details.**
+   ```yaml
+   llm:
+     mode: "openai"           # required to use the OpenAI REST protocol
+     api_key: "sk-YOUR-KEY"   # omit to fall back on OPENAI_API_KEY env var
+     base_url: "http://localhost:8000/v1"  # omit to use https://api.openai.com/v1
+     model: "gpt-4.1-mini"    # replace with your deployed model ID
+     temperature: 0.4
+   ```
+
+3. **(Optional) Configure via environment variables.**
+   ```bash
+   export OPENAI_API_KEY=sk-your-key
+   export OPENAI_BASE_URL=http://localhost:8000/v1
+   export OPENEVOLVE_MODEL_PRIMARY=gpt-4.1-mini
+   ```
+   CLI flags always override environment variables; environment variables override YAML
+   defaults.
+
+4. **Dry-run prompts without sending requests.**
+   ```bash
+   openevolve run --config configs/default.yml --run-id dry --dry-run
+   ```
+   The engine prints the assembled prompts so you can verify context length and
+   instructions before contacting a real model.
+
+If your deployment requires custom headers or authentication, wrap the engine yourself:
+`openevolve.engine.evolve` accepts any callable `llm_call(prompt: str) -> str`, so you can
+plug in bespoke networking logic.
+
+---
+
+## Understanding the architecture
+
+OpenEvolve is composed of modular subsystems. Each can be used independently, but the CLI
+wires everything together for you.
+
+| Component | Module | Responsibility |
+| --- | --- | --- |
+| **ProgramDB** | `src/openevolve/db.py` | SQLite-backed storage for runs, candidates, evaluations, and meta-prompts. Auto-migrates using `src/openevolve/schema.sql`. |
+| **PromptSampler** | `src/openevolve/prompt_sampler.py` | Builds long-context prompts that mix elite, novel, and failed exemplars while respecting token budgets. |
+| **Meta-prompt evolution** | `src/openevolve/meta_prompt.py` | Maintains and mutates instruction templates; attributes fitness from downstream candidate performance. |
+| **Apply engine** | `src/openevolve/apply.py` | Safely applies unified or JSON diffs to EVOLVE blocks or entire files, reverting on failure. |
+| **Evaluator cascade** | `src/openevolve/evaluators/` | Runs pluggable evaluators in parallel with timeouts, retries, and optional early cancellation. |
+| **Selection & archive** | `src/openevolve/selection.py` | Computes Pareto fronts, novelty scores, and ageing penalties; samples mixture populations for the next generation. |
+| **Visualization** | `src/openevolve/viz.py` | Produces Pareto scatter plots and writes them to `artifacts/`. |
+| **Engine** | `src/openevolve/engine.py` | Orchestrates the full evolution loop, handles persistence, and streams logging events. |
+| **CLI** | `src/openevolve/cli.py` | User-facing entry point with `init-db`, `run`, `resume`, `inspect`, `export-archive`, and `viz` subcommands. |
+
+Each generation flows through the following stages:
+
+1. Select meta-prompt templates and parent candidates.
+2. Assemble prompts with the PromptSampler and call the LLM.
+3. Apply returned patches to the working tree (block-scoped or whole-file mode).
+4. Persist candidates in SQLite and capture code snapshots.
+5. Run evaluators via the cascade, respecting per-stage timeouts.
+6. Update Pareto fronts, novelty scores, and ageing counters.
+7. Attribute fitness back to meta-prompts and update the archive.
+8. Emit JSONL logs and store artifacts under `runs/<run-id>/`.
+
+---
+
+## Configuration cheat sheet
+
+All configuration files live in `configs/`. They are plain YAML and support comments.
+Below is a condensed reference of the most frequently touched keys. When in doubt, copy
+`configs/default.yml` and edit the values.
+
+| Section | Key | Description |
+| --- | --- | --- |
+| `task` | `name`, `workdir`, `entrypoint`, `target_file`, `evolve_blocks` | Describes the optimisation problem, where code lives, and which EVOLVE blocks may be edited. |
+| `population_size` | integer | Number of candidates generated per generation. |
+| `generations` | integer | How many iterations to run. |
+| `metrics` | mapping | Metric names mapped to `maximize`/`minimize`. Drives Pareto ranking. |
+| `selection` | `elite`, `novel`, `young` | How many candidates of each category survive to seed the next generation. |
+| `sampler` | `budget_tokens`, `elites_k`, `novel_m`, `include_failures` | Prompt assembly parameters. |
+| `evolution` | `scope`, `apply_safe_revert` | Choose `blocks` or `wholefile`; enable automatic revert on failing tests. |
+| `cascade` | `max_parallel`, `cancel_on_fail`, `evaluators` | Controls evaluator concurrency and definitions. |
+| `meta_prompt` | `population`, `mutation_prob`, `selection_top_k` | Size and behaviour of the meta-prompt population. |
+| `archive` | `capacity`, `k_novelty`, `ageing_threshold` | Archive and novelty search settings. |
+| `llm` | `mode`, `api_key`, `base_url`, `model`, `temperature` | LLM connector configuration. |
+| `seed` | integer | Optional RNG seed for reproducibility. |
+
+Whenever you edit a config file, rerun `openevolve run --config ...` or `resume` with the
+same `run-id`. The engine persists the entire config JSON in the database for reproducible
+runs.
+
+---
+
+## Inspecting results, artifacts, and logs
+
+Everything generated during a run lives under `runs/<run-id>/`:
+
+```
+runs/
+  <run-id>/
+    config.json              # frozen config copy
+    logs.jsonl               # line-delimited JSON events (generation, metrics, errors)
+    meta_prompts/            # mutated templates per generation
+    gen_<N>/
+      prompts/               # assembled prompts fed to the LLM
+      patches/               # JSON + unified diffs returned by the LLM
+      snapshots/             # post-apply source files
+      evaluations.json       # cascade outputs keyed by evaluator name
+```
+
+The SQLite database (`.openevolve/openevolve.db` by default) stores all persistent state:
+runs, candidates, evaluations, and meta-prompt histories. Use any SQLite browser or the
+CLI `inspect` command to explore it. For a structured export you can feed into notebooks,
+run:
+
+```bash
+python scripts/export_archive.py --run-id demo --out artifacts/demo_archive.json
+```
+
+Visualisations land in `artifacts/`. If the directory is missing, commands such as
+`openevolve viz` will create it automatically.
+
+---
+
+## Troubleshooting & FAQ
+
+**The CLI says “command not found”.**  Make sure your virtual environment is activated
+and that you installed the package with `pip install -e .`.
+
+**Prompts look too long / I hit context limits.**  Lower `sampler.budget_tokens` or reduce
+`sampler.elites_k` / `sampler.novel_m`. The sampler truncates the oldest examples first,
+so keeping only the freshest elites helps.
+
+**Evaluations never finish.**  Double-check the `timeout_s` values inside the `cascade`
+section and that your evaluators are runnable in isolation (try `pytest` or the target
+script manually).
+
+**Whole-file mode reverted my patch.**  When `evolution.apply_safe_revert` is true, any
+patch that fails to apply cleanly **or** causes evaluators to fail is undone. Inspect the
+logs under `runs/<run-id>/gen_<N>/patches/` to see the diff and error message.
+
+**I want to plug in a custom task.**  Add a directory under `tasks/` with three files:
+`__init__.py`, `program.py` (with EVOLVE blocks), and `evaluate.py` (returning a metrics
+dictionary). Point the config’s `task` section to those files. Use existing tasks as a
+blueprint.
+
+**Can I call the engine from Python directly?**  Yes:
+```python
+from openevolve import config, db, engine
+
+cfg = config.load_config("configs/demo_math.yml")
+program_db = db.ProgramDB(cfg["db_path"])
+await engine.evolve(run_id="demo", cfg=cfg, llm_call=lambda prompt: "{\"diffs\": []}")
+```
+Remember to run this inside an async event loop (`asyncio.run`).
+
+Still stuck? Open an issue with the command you ran, the config file you used, and the last
+20 lines of `runs/<run-id>/logs.jsonl`. That information lets maintainers reproduce your
+problem quickly.
+
+---
+
+## Developer workflow
+
+Set up tooling once per clone:
+
+```bash
+pip install -e .[dev]  # optional extras: ruff, black, mypy, pytest
+```
+
+Before submitting patches, run the formatting and test suite:
 
 ```bash
 ruff check src tests
 black src tests
 mypy src
-pytest
+pytest -q
 ```
 
-The new unit tests cover the ProgramDB, selection utilities, prompt sampler, meta-prompt
-updates, and an end-to-end smoke test for the async evolution engine. All tests run with a
-deterministic fake LLM so they do not require network access.
+The repository ships with unit tests for ProgramDB, selection, prompt sampling,
+meta-prompt evolution, and the engine. They use deterministic fake LLM responses, so the
+suite runs entirely offline.
 
-## Development
-
-Run the formatting, linting, and test suite:
-
-```bash
-ruff check src tests
-black src tests
-mypy src
-pytest
-```
+---
 
 ## License
 
-The project is distributed under the terms of the MIT License.
+OpenEvolve is distributed under the MIT License. See `LICENSE` for full terms.
