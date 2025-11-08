@@ -43,7 +43,8 @@ class EvolutionController:
     ) -> None:
         self.settings = load_settings()
         self.client: LLMClientProtocol = client or build_default_client()
-        self._model = model
+        # Fall back to the configured primary model when no explicit override is provided.
+        self._model = model or self.settings.model_primary
         self._temperature = temperature
         self._candidates = max(1, candidates)
         self._max_rounds = max(1, max_rounds)
@@ -113,15 +114,26 @@ class EvolutionController:
                 block_source=current_block.content,
             )
             try:
+                request_model = chosen_model or self._model
+                self._logger.debug(
+                    "Invoking language model (model=%s, temperature=%.2f, n=%s)",
+                    request_model,
+                    chosen_temperature,
+                    num_candidates,
+                )
                 result = await self.client.generate(
                     prompt=prompt,
                     system=system,
-                    model=chosen_model,
+                    model=request_model,
                     n=num_candidates,
                     temperature=chosen_temperature,
                     extra_messages=extra_messages,
                 )
+                self._logger.debug(
+                    "Received %s candidate(s) from language model", len(result.candidates)
+                )
             except Exception:  # noqa: BLE001
+                self._logger.exception("Language model request failed; aborting evolution round")
                 continue
 
             prompt_source = current_source
