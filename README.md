@@ -69,11 +69,13 @@ copy-paste ready.
    `src/openevolve/schema.sql`.
 
 5. **Launch a canned two-generation demo run.**
+   Make sure `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`) are exported so the CLI can
+   authenticate with your OpenAI-compatible endpoint.
    ```bash
+   export OPENAI_API_KEY=sk-...
    openevolve run --config configs/demo_math.yml --run-id demo
    ```
-   The demo uses an internal echo LLM so you do **not** need any credentials. Expect the
-   run to finish in under 30 seconds and write artifacts to `runs/demo/`.
+   Expect the run to finish in under 30 seconds and write artifacts to `runs/demo/`.
 
 6. **Inspect what just happened.**
    ```bash
@@ -112,8 +114,8 @@ Pareto optimisation across **accuracy**, **execution time**, and **code length**
    ```bash
    python examples/algorithmic_optimization.py
    ```
-   This compares the baseline bubble sort against a hand-crafted insertion sort and prints
-   the metrics we optimise for during evolution.
+   The script spins up `EvolutionController` with the default OpenAI-compatible client,
+   performs one evolutionary step, and prints baseline versus improved metrics.
 
 3. **Run the evolutionary loop.**
    ```bash
@@ -139,7 +141,7 @@ Pareto optimisation across **accuracy**, **execution time**, and **code length**
 ## Using your own (or a local) OpenAI-compatible model
 
 OpenEvolve speaks the OpenAI Chat Completions protocol. You can point it to OpenAI’s
-hosted endpoints or any local deployment that mimics the API (for example, vLLM,
+hosted endpoints or any self-hosted deployment that mimics the API (for example, vLLM,
 Ollama, LM Studio, or Text Generation Web UI).
 
 1. **Pick a configuration file.**
@@ -225,7 +227,7 @@ Below is a condensed reference of the most frequently touched keys. When in doub
 | `cascade` | `max_parallel`, `cancel_on_fail`, `evaluators` | Controls evaluator concurrency and definitions. |
 | `meta_prompt` | `population`, `mutation_prob`, `selection_top_k` | Size and behaviour of the meta-prompt population. |
 | `archive` | `capacity`, `k_novelty`, `ageing_threshold` | Archive and novelty search settings. |
-| `llm` | `mode`, `api_key`, `base_url`, `model`, `temperature` | LLM connector configuration. |
+| `llm` | `mode`, `api_key`, `base_url`, `model`, `temperature` | LLM connector configuration. Only `mode: openai` is supported. |
 | `seed` | integer | Optional RNG seed for reproducibility. |
 
 Whenever you edit a config file, rerun `openevolve run --config ...` or `resume` with the

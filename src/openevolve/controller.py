@@ -40,8 +40,13 @@ class EvolutionController:
 
         accepted_metrics: dict[str, float] | None = None
         for diff_text in result.candidates:
-            validate_model_response(diff_text)
-            new_source = apply_diff(block.content, parse_diff(diff_text))
+            try:
+                validate_model_response(diff_text)
+                hunks = parse_diff(diff_text)
+                new_source = apply_diff(block.content, hunks)
+            except ValueError:
+                continue
+
             updated_program = replace_block(source, block, new_source)
             metrics = dict(task.evaluation(updated_program))
             if metrics:
