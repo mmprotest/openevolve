@@ -1,59 +1,61 @@
-"""Configuration helpers for OpenEvolve."""
+"""Configuration helpers for legacy settings and new YAML configs."""
 
 from __future__ import annotations
 
-import os
-from functools import lru_cache
+import copy
+from pathlib import Path
 from typing import Any
 
-try:  # pragma: no cover - exercised when optional dependency installed
-    from pydantic import Field  # type: ignore
-    from pydantic_settings import BaseSettings, SettingsConfigDict  # type: ignore
-except ImportError:  # pragma: no cover - fallback executed in constrained environments
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    yaml = None  # type: ignore[assignment]
 
-    class Field:  # type: ignore[override]
-        def __init__(self, default: Any = None, alias: str | None = None) -> None:
-            self.default = default
-            self.alias = alias
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-    class BaseSettings:  # type: ignore[override]
-        def __init__(self, **data: Any) -> None:
-            annotations = getattr(self.__class__, "__annotations__", {})
-            for name, annotation in annotations.items():
-                field: Field = getattr(self.__class__, name)  # type: ignore[assignment]
-                env_name = field.alias or name.upper()
-                env_value = os.getenv(env_name)
-                if name in data:
-                    value = data[name]
-                elif env_value is not None:
-                    value = self._convert(env_value, annotation)
-                else:
-                    value = field.default
-                setattr(self, name, value)
+DEFAULTS: dict[str, Any] = {
+    "db_path": ".openevolve/openevolve.db",
+    "artifacts_root": "runs",
+    "population_size": 8,
+    "generations": 5,
+    "selection": {"elite": 4, "novel": 2, "young": 2},
+    "metrics": {},
+    "sampler": {"budget_tokens": 4000, "elites_k": 4, "novel_m": 4, "include_failures": 2},
+    "cascade": {"max_parallel": 4, "cancel_on_fail": False, "evaluators": []},
+    "meta_prompt": {"population": 4, "mutation_prob": 0.2, "selection_top_k": 3},
+    "archive": {"capacity": 200, "k_novelty": 8, "ageing_threshold": 6},
+    "evolution": {"scope": "blocks", "apply_safe_revert": True},
+}
 
-        @staticmethod
-        def _convert(value: str, annotation: Any) -> Any:
-            if annotation in {int, int | None}:  # type: ignore[comparison-overlap]
-                try:
-                    return int(value)
-                except ValueError:
-                    return value
-            if annotation in {float, float | None}:  # type: ignore[comparison-overlap]
-                try:
-                    return float(value)
-                except ValueError:
-                    return value
-            if annotation is bool:
-                return value.lower() in {"1", "true", "yes"}
-            return value
 
-    class SettingsConfigDict:  # type: ignore[override]
-        def __init__(self, **_: Any) -> None:
-            pass
+def _merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _merge_dict(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def load_config(path: str | None, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = copy.deepcopy(DEFAULTS)
+    if path:
+        if yaml is None:
+            raise RuntimeError("PyYAML is required to load configuration files")
+        with Path(path).open("r", encoding="utf-8") as fh:
+            file_cfg = yaml.safe_load(fh) or {}
+        config = _merge_dict(config, file_cfg)
+    if overrides:
+        config = _merge_dict(config, overrides)
+    return config
 
 
 class OpenEvolveSettings(BaseSettings):
-    """Runtime configuration derived from environment variables."""
+    """Environment driven settings for the original controller pipeline."""
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
@@ -64,17 +66,8 @@ class OpenEvolveSettings(BaseSettings):
     novelty_threshold: float = Field(default=0.15, alias="OPENEVOLVE_NOVELTY_THRESHOLD")
     archive_size: int = Field(default=200, alias="OPENEVOLVE_ARCHIVE_SIZE")
 
-    model_config = SettingsConfigDict(env_prefix="", env_file=None, extra="ignore")
 
-    def openai_headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.openai_api_key:
-            headers["Authorization"] = f"Bearer {self.openai_api_key}"
-        return headers
+def load_settings() -> OpenEvolveSettings:
+    """Return settings initialised from environment."""
 
-
-@lru_cache(maxsize=1)
-def load_settings(**overrides: Any) -> OpenEvolveSettings:
-    """Load configuration with optional overrides (cached)."""
-
-    return OpenEvolveSettings(**overrides)
+    return OpenEvolveSettings()
