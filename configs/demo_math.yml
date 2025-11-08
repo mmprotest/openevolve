@@ -35,5 +35,6 @@ evolution:
   scope: "blocks"
   apply_safe_revert: true
 llm:
-  mode: "echo"
-  response: "[]"
+  mode: "openai"
+  model: "gpt-4.1-mini"
+  temperature: 0.7
