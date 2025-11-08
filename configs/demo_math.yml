@@ -1,0 +1,39 @@
+db_path: ".openevolve/openevolve.db"
+workdir: "."
+population_size: 2
+generations: 2
+metrics:
+  accuracy: maximize
+  time_ms: minimize
+selection:
+  elite: 1
+  novel: 1
+  young: 0
+task:
+  description: "Optimise math helper"
+  target_file: "tasks/toy_sum_squares/program.py"
+sampler:
+  budget_tokens: 2000
+  elites_k: 2
+  novel_m: 1
+  include_failures: 1
+cascade:
+  max_parallel: 2
+  cancel_on_fail: false
+  evaluators:
+    - name: "LintsEvaluator"
+      max_lines: 120
+meta_prompt:
+  population: 3
+  mutation_prob: 0.25
+  selection_top_k: 2
+archive:
+  capacity: 20
+  k_novelty: 4
+  ageing_threshold: 5
+evolution:
+  scope: "blocks"
+  apply_safe_revert: true
+llm:
+  mode: "echo"
+  response: "[]"

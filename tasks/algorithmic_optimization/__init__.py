@@ -1,0 +1,1 @@
+"""Algorithmic optimisation demo task."""

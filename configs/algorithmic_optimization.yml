@@ -1,0 +1,45 @@
+# Multi-objective configuration showcasing algorithmic optimisation.
+# Demonstrates accuracy, runtime, and code length trade-offs.
+db_path: ".openevolve/openevolve.db"
+workdir: "."
+artifacts_root: "runs"
+population_size: 4
+generations: 4
+metrics:
+  accuracy: maximize
+  time_ms: minimize
+  code_length: minimize
+selection:
+  elite: 2
+  novel: 1
+  young: 1
+task:
+  description: "Evolve a better sorting heuristic balancing speed and size."
+  target_file: "tasks/algorithmic_optimization/program.py"
+  evolve_blocks:
+    - [9, 24]
+sampler:
+  budget_tokens: 5000
+  elites_k: 4
+  novel_m: 2
+  include_failures: 2
+cascade:
+  max_parallel: 3
+  cancel_on_fail: false
+  evaluators:
+    - name: "LintsEvaluator"
+      max_lines: 180
+meta_prompt:
+  population: 5
+  mutation_prob: 0.3
+  selection_top_k: 3
+archive:
+  capacity: 80
+  k_novelty: 6
+  ageing_threshold: 6
+evolution:
+  scope: "blocks"
+  apply_safe_revert: true
+llm:
+  mode: "echo"
+  response: "[]"

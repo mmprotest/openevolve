@@ -1,26 +1,35 @@
-from openevolve.selection import dominates, novelty_score, pareto_front, update_archive
+from __future__ import annotations
+
+from openevolve.selection import Archive, jaccard_novelty, pareto_rank
 
 
-def test_dominates_and_pareto():
+def test_pareto_rank_and_archive():
     candidates = [
-        {"accuracy": 0.9, "speed": 0.5},
-        {"accuracy": 0.85, "speed": 0.7},
-        {"accuracy": 0.9, "speed": 0.6},
+        {"cand_id": "a", "gen": 0, "code_snapshot": "def f():\n    return 1\n"},
+        {"cand_id": "b", "gen": 0, "code_snapshot": "def f():\n    return 2\n"},
+        {"cand_id": "c", "gen": 1, "code_snapshot": "def g():\n    return 3\n"},
     ]
-    front = pareto_front(candidates, ["accuracy", "speed"])
-    assert set(front) == {1, 2}
-    assert dominates(candidates[2], candidates[0], ["accuracy", "speed"])
+    evals = {
+        "a": {"acc": 0.8, "time": 100},
+        "b": {"acc": 0.9, "time": 120},
+        "c": {"acc": 0.85, "time": 90},
+    }
+    metrics = {"acc": True, "time": False}
+
+    ranks = pareto_rank(candidates, evals, metrics)
+    assert ranks["c"] == 0
+
+    archive = Archive(capacity=3, metrics=metrics, k_novelty=2)
+    archive.update(candidates, evals, current_gen=2)
+    mixture = archive.sample_mixture(1, 1, 1)
+    assert "c" in mixture
 
 
-def test_novelty_score_and_archive():
-    archive: list[tuple[float, float]] = []
-    score_empty = novelty_score((0.0, 0.0), archive)
-    assert score_empty == float("inf")
-
-    update_archive(archive, (0.0, 0.0), max_size=5)
-    update_archive(archive, (1.0, 1.0), max_size=5)
-    score = novelty_score((0.5, 0.5), archive, k=2)
-    assert 0 < score < 1
-
-    update_archive(archive, (2.0, 2.0), max_size=2)
-    assert len(archive) == 2
+def test_jaccard_novelty():
+    features = {
+        "a": {"foo", "Bar"},
+        "b": {"foo", "Baz"},
+        "c": {"alpha", "beta"},
+    }
+    novelty = jaccard_novelty(features, 2)
+    assert novelty["c"] > novelty["a"]
