@@ -57,6 +57,15 @@ def _parse_args() -> argparse.Namespace:
         help="Maximum number of language-model rounds to attempt before giving up (default: 3).",
     )
     parser.add_argument(
+        "--evolutions",
+        type=int,
+        default=1,
+        help=(
+            "Number of sequential evolution cycles to run. Each cycle starts from the best "
+            "candidate produced by the previous one (default: 1)."
+        ),
+    )
+    parser.add_argument(
         "--full-search",
         action="store_true",
         help=(
@@ -101,7 +110,6 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         candidate_program = Path(tmpdir) / "program.py"
-        candidate_program.write_text(baseline_source, encoding="utf-8")
 
         task = EvolutionTask(
             name="algorithmic-optimisation-demo",
@@ -118,21 +126,41 @@ def main() -> None:
             system_prompt=args.system_prompt or EvolutionController.DEFAULT_SYSTEM_PROMPT,
             stop_on_first=not args.full_search,
         )
-        improved_metrics = asyncio.run(
-            controller.evolve_once(
-                task,
-                stop_on_first=not args.full_search,
+
+        current_source = baseline_source
+        for cycle in range(1, args.evolutions + 1):
+            candidate_program.write_text(current_source, encoding="utf-8")
+            print(f"\n=== Evolution cycle {cycle} ===")
+
+            improved_metrics = asyncio.run(
+                controller.evolve_once(
+                    task,
+                    stop_on_first=not args.full_search,
+                )
             )
-        )
 
-        _print_metrics("\nImproved candidate metrics:", dict(improved_metrics))
+            _print_metrics(
+                f"\nImproved candidate metrics (cycle {cycle}):",
+                dict(improved_metrics),
+            )
 
-        updated_source = candidate_program.read_text(encoding="utf-8")
-        if updated_source == baseline_source:
-            print("\nNo viable candidate was found; leaving the baseline implementation unchanged.")
+            updated_source = candidate_program.read_text(encoding="utf-8")
+            if updated_source == current_source:
+                print(
+                    "\nNo viable candidate was found; leaving the current implementation unchanged."
+                )
+                break
 
-        print("\nUpdated EVOLVE block:\n")
-        print(updated_source)
+            print("\nUpdated EVOLVE block:\n")
+            print(updated_source)
+
+            current_source = updated_source
+
+        if current_source != baseline_source:
+            print("\nFinal evolved implementation:\n")
+            print(current_source)
+        else:
+            print("\nEvolution finished without improving the baseline implementation.")
 
 
 if __name__ == "__main__":
