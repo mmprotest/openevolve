@@ -1,8 +1,11 @@
-"""Run the algorithmic optimisation demo task end-to-end."""
+"""Run the algorithmic optimisation demo task end-to-end using a live LLM."""
 
 from __future__ import annotations
 
+import asyncio
+import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -12,7 +15,12 @@ for entry in (ROOT, SRC):
     if entry_str not in sys.path:
         sys.path.insert(0, entry_str)
 
+from openevolve.controller import EvolutionController, EvolutionTask
 from tasks.algorithmic_optimization.evaluate import evaluate
+
+TASK_DESCRIPTION = (
+    "Improve the EVOLVE block to keep accuracy at 1.0 while reducing latency and code size."
+)
 
 PROGRAM_PATH = (
     ROOT
@@ -21,35 +29,83 @@ PROGRAM_PATH = (
     / "program.py"
 )
 
-BASELINE_BLOCK = """    arr = list(values)\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n - i - 1):\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n    return arr\n"""
 
-IMPROVED_BLOCK = """    arr = list(values)\n    for idx in range(1, len(arr)):\n        value = arr[idx]\n        pos = idx - 1\n        while pos >= 0 and arr[pos] > value:\n            arr[pos + 1] = arr[pos]\n            pos -= 1\n        arr[pos + 1] = value\n    return arr\n"""
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model",
+        help="Override the model used for diff generation. Defaults to the configured primary model.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="Sampling temperature passed to the language model (default: 0.7).",
+    )
+    parser.add_argument(
+        "--candidates",
+        type=int,
+        default=3,
+        help="Number of diff candidates to request per round (default: 3).",
+    )
+    parser.add_argument(
+        "--rounds",
+        type=int,
+        default=3,
+        help="Maximum number of language-model rounds to attempt before giving up (default: 3).",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        help="Optional system prompt override sent to the model when mutating the EVOLVE block.",
+    )
+    parser.add_argument(
+        "--description",
+        default=TASK_DESCRIPTION,
+        help="Custom task description passed to the model.",
+    )
+    return parser.parse_args()
+
+
+def _print_metrics(title: str, metrics: dict[str, float]) -> None:
+    print(title)
+    for name, value in metrics.items():
+        print(f"  {name:>12}: {value:.4f}")
 
 
 def main() -> None:
+    args = _parse_args()
+
     baseline_source = PROGRAM_PATH.read_text(encoding="utf-8")
     baseline_metrics = evaluate(baseline_source)
+    _print_metrics("Baseline bubble sort metrics:", dict(baseline_metrics))
 
-    improved_source = baseline_source.replace(BASELINE_BLOCK, IMPROVED_BLOCK)
-    improved_metrics = evaluate(improved_source)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        candidate_program = Path(tmpdir) / "program.py"
+        candidate_program.write_text(baseline_source, encoding="utf-8")
 
-    print("Baseline bubble sort metrics:")
-    for name, value in baseline_metrics.items():
-        print(f"  {name:>12}: {value:.4f}")
+        task = EvolutionTask(
+            name="algorithmic-optimisation-demo",
+            description=args.description,
+            program_path=candidate_program,
+            evaluation=evaluate,
+        )
+        controller = EvolutionController(
+            model=args.model,
+            temperature=args.temperature,
+            candidates=args.candidates,
+            max_rounds=args.rounds,
+            system_prompt=args.system_prompt or EvolutionController.DEFAULT_SYSTEM_PROMPT,
+        )
+        improved_metrics = asyncio.run(controller.evolve_once(task))
 
-    print("\nInsertion-sort inspired metrics:")
-    for name, value in improved_metrics.items():
-        print(f"  {name:>12}: {value:.4f}")
+        _print_metrics("\nImproved candidate metrics:", dict(improved_metrics))
 
-    print("\nPatch preview:")
-    base_lines = BASELINE_BLOCK.splitlines()
-    improved_lines = IMPROVED_BLOCK.splitlines()
-    max_len = max(len(base_lines), len(improved_lines))
-    base_lines.extend([""] * (max_len - len(base_lines)))
-    improved_lines.extend([""] * (max_len - len(improved_lines)))
-    for before, after in zip(base_lines, improved_lines):
-        print(f"- {before}")
-        print(f"+ {after}")
+        updated_source = candidate_program.read_text(encoding="utf-8")
+        if updated_source == baseline_source:
+            print("\nNo viable candidate was found; leaving the baseline implementation unchanged.")
+
+        print("\nUpdated EVOLVE block:\n")
+        print(updated_source)
 
 
 if __name__ == "__main__":

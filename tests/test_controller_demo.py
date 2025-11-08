@@ -62,3 +62,40 @@ def test_controller_accepts_static_diff(tmp_path: Path) -> None:
     assert metrics["correct"] == 1.0
     updated_source = program_path.read_text()
     assert "sum(value * value for value in values)" in updated_source
+
+
+class _InvalidClient(LLMClientProtocol):
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        system: str,
+        model: str | None = None,
+        n: int = 1,
+        temperature: float = 0.7,
+        extra_messages: Sequence[dict[str, Any]] | None = None,
+    ) -> GenerationResult:
+        return GenerationResult(candidates=["invalid diff"])
+
+    async def aclose(self) -> None:  # pragma: no cover - no resources
+        return None
+
+
+def test_controller_returns_baseline_when_no_candidate(tmp_path: Path) -> None:
+    program_source = Path("tasks/toy_sum_squares/program.py").read_text()
+    program_path = tmp_path / "program.py"
+    program_path.write_text(program_source)
+
+    task = EvolutionTask(
+        name="toy-demo",
+        description=toy_eval.TASK_DESCRIPTION,
+        program_path=program_path,
+        evaluation=toy_eval.evaluate,
+    )
+    controller = EvolutionController(client=_InvalidClient())
+
+    baseline_metrics = dict(toy_eval.evaluate(program_source))
+    metrics = asyncio.run(controller.evolve_once(task))
+
+    assert metrics == baseline_metrics
+    assert program_path.read_text() == program_source
