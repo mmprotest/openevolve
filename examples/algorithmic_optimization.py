@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import sys
 import tempfile
 from pathlib import Path
@@ -29,6 +30,42 @@ PROGRAM_PATH = (
 )
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model",
+        help="Override the model used for diff generation. Defaults to the configured primary model.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="Sampling temperature passed to the language model (default: 0.7).",
+    )
+    parser.add_argument(
+        "--candidates",
+        type=int,
+        default=3,
+        help="Number of diff candidates to request per round (default: 3).",
+    )
+    parser.add_argument(
+        "--rounds",
+        type=int,
+        default=3,
+        help="Maximum number of language-model rounds to attempt before giving up (default: 3).",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        help="Optional system prompt override sent to the model when mutating the EVOLVE block.",
+    )
+    parser.add_argument(
+        "--description",
+        default=TASK_DESCRIPTION,
+        help="Custom task description passed to the model.",
+    )
+    return parser.parse_args()
+
+
 def _print_metrics(title: str, metrics: dict[str, float]) -> None:
     print(title)
     for name, value in metrics.items():
@@ -36,6 +73,8 @@ def _print_metrics(title: str, metrics: dict[str, float]) -> None:
 
 
 def main() -> None:
+    args = _parse_args()
+
     baseline_source = PROGRAM_PATH.read_text(encoding="utf-8")
     baseline_metrics = evaluate(baseline_source)
     _print_metrics("Baseline bubble sort metrics:", dict(baseline_metrics))
@@ -46,16 +85,25 @@ def main() -> None:
 
         task = EvolutionTask(
             name="algorithmic-optimisation-demo",
-            description=TASK_DESCRIPTION,
+            description=args.description,
             program_path=candidate_program,
             evaluation=evaluate,
         )
-        controller = EvolutionController()
+        controller = EvolutionController(
+            model=args.model,
+            temperature=args.temperature,
+            candidates=args.candidates,
+            max_rounds=args.rounds,
+            system_prompt=args.system_prompt or EvolutionController.DEFAULT_SYSTEM_PROMPT,
+        )
         improved_metrics = asyncio.run(controller.evolve_once(task))
 
         _print_metrics("\nImproved candidate metrics:", dict(improved_metrics))
 
         updated_source = candidate_program.read_text(encoding="utf-8")
+        if updated_source == baseline_source:
+            print("\nNo viable candidate was found; leaving the baseline implementation unchanged.")
+
         print("\nUpdated EVOLVE block:\n")
         print(updated_source)
 
