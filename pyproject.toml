@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.2",
     "sqlmodel>=0.0.16",
     "typing-extensions>=4.9",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.3",
 ]
+
+[project.scripts]
+openevolve = "openevolve.cli:main"
 
 [tool.black]
 target-version = ["py311"]
@@ -45,3 +49,6 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"openevolve" = ["schema.sql"]

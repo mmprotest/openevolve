@@ -1,0 +1,39 @@
+db_path: ".openevolve/openevolve.db"
+workdir: "."
+artifacts_root: "runs"
+population_size: 4
+generations: 2
+metrics:
+  accuracy: maximize
+  time_ms: minimize
+selection:
+  elite: 2
+  novel: 1
+  young: 1
+task:
+  description: "Improve toy math helper"
+  target_file: "tasks/toy_sum_squares/program.py"
+sampler:
+  budget_tokens: 4000
+  elites_k: 4
+  novel_m: 2
+  include_failures: 2
+cascade:
+  max_parallel: 2
+  cancel_on_fail: false
+  evaluators:
+    - name: "LintsEvaluator"
+      max_lines: 200
+meta_prompt:
+  population: 4
+  mutation_prob: 0.3
+  selection_top_k: 3
+archive:
+  capacity: 50
+  k_novelty: 5
+  ageing_threshold: 6
+evolution:
+  scope: "blocks"
+  apply_safe_revert: true
+llm:
+  mode: "noop"
