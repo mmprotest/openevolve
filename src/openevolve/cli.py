@@ -22,51 +22,43 @@ from .viz import plot_pareto
 logger = logging.getLogger(__name__)
 
 
-def _default_llm_call(prompt: str) -> str:  # pragma: no cover - interactive usage
-    raise RuntimeError("No LLM backend configured. Provide an llm_call implementation.")
-
-
 def _resolve_llm(cfg: dict[str, Any]) -> Callable[[str], str]:
     llm_cfg = cfg.get("llm", {})
-    mode = llm_cfg.get("mode", "noop")
-    if mode == "noop":
-        return lambda prompt: ""
-    if mode == "echo":
-        return lambda prompt: llm_cfg.get("response", "")
-    if mode == "file":
-        path = Path(llm_cfg["path"]).expanduser()
-        return lambda prompt: path.read_text(encoding="utf-8")
-    if mode == "openai":
-        client = OpenEvolveClient(
-            api_key=llm_cfg.get("api_key"),
-            base_url=llm_cfg.get("base_url"),
-            default_model=llm_cfg.get("model"),
-            timeout=float(llm_cfg.get("timeout", 60.0)),
-            max_retries=int(llm_cfg.get("max_retries", 3)),
+    mode = llm_cfg.get("mode", "openai")
+    if mode != "openai":
+        raise ValueError(
+            f"Unsupported llm mode '{mode}'. OpenEvolve now requires an OpenAI-compatible backend."
         )
-        system_prompt = llm_cfg.get(
-            "system_prompt",
-            "You are an expert software engineer evolving code through structured diffs.",
+
+    client = OpenEvolveClient(
+        api_key=llm_cfg.get("api_key"),
+        base_url=llm_cfg.get("base_url"),
+        default_model=llm_cfg.get("model"),
+        timeout=float(llm_cfg.get("timeout", 60.0)),
+        max_retries=int(llm_cfg.get("max_retries", 3)),
+    )
+    system_prompt = llm_cfg.get(
+        "system_prompt",
+        "You are an expert software engineer evolving code through structured diffs.",
+    )
+    temperature = float(llm_cfg.get("temperature", 0.7))
+    n = int(llm_cfg.get("n", 1))
+
+    def _call(prompt: str) -> str:
+        result = client.generate_sync(
+            prompt=prompt,
+            system=system_prompt,
+            n=n,
+            temperature=temperature,
         )
-        temperature = float(llm_cfg.get("temperature", 0.7))
-        n = int(llm_cfg.get("n", 1))
+        return result.candidates[0] if result.candidates else ""
 
-        def _call(prompt: str) -> str:
-            result = client.generate_sync(
-                prompt=prompt,
-                system=system_prompt,
-                n=n,
-                temperature=temperature,
-            )
-            return result.candidates[0] if result.candidates else ""
+    def _close_client() -> None:
+        loop = ensure_event_loop()
+        loop.run_until_complete(client.aclose())
 
-        def _close_client() -> None:
-            loop = ensure_event_loop()
-            loop.run_until_complete(client.aclose())
-
-        atexit.register(_close_client)
-        return _call
-    return _default_llm_call
+    atexit.register(_close_client)
+    return _call
 
 
 def cmd_init_db(args: argparse.Namespace) -> None:
