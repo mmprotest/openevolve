@@ -126,40 +126,62 @@ def cmd_viz(args: argparse.Namespace) -> None:
     plot_pareto(args.run_id, db, metrics, Path(args.out))
 
 
+def _add_db_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="Database path (defaults to .openevolve/openevolve.db)",
+    )
+
+
+def _add_workdir_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--workdir",
+        default=None,
+        help="Workspace directory (defaults to .)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="openevolve", description="OpenEvolve command line")
-    parser.add_argument("--db", default=".openevolve/openevolve.db", help="Database path")
-    parser.add_argument("--workdir", default=".", help="Workspace directory")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init-db", help="Initialise database")
+    _add_db_argument(p_init)
     p_init.set_defaults(func=cmd_init_db)
 
     p_run = sub.add_parser("run", help="Start a new run")
     p_run.add_argument("--config", required=True)
     p_run.add_argument("--run-id")
     p_run.add_argument("--dry-run", action="store_true")
+    _add_db_argument(p_run)
+    _add_workdir_argument(p_run)
     p_run.set_defaults(func=cmd_run)
 
     p_resume = sub.add_parser("resume", help="Resume a run")
     p_resume.add_argument("--run-id", required=True)
     p_resume.add_argument("--dry-run", action="store_true")
+    _add_db_argument(p_resume)
+    _add_workdir_argument(p_resume)
     p_resume.set_defaults(func=cmd_resume)
 
     p_inspect = sub.add_parser("inspect", help="Inspect top candidates")
     p_inspect.add_argument("--run-id", required=True)
     p_inspect.add_argument("--top", type=int, default=10)
+    _add_db_argument(p_inspect)
     p_inspect.set_defaults(func=cmd_inspect)
 
     p_export = sub.add_parser("export-archive", help="Export archive as JSON")
     p_export.add_argument("--run-id", required=True)
     p_export.add_argument("--out", required=True)
+    _add_db_argument(p_export)
     p_export.set_defaults(func=cmd_export_archive)
 
     p_viz = sub.add_parser("viz", help="Plot Pareto fronts")
     p_viz.add_argument("--run-id", required=True)
     p_viz.add_argument("--metric-axes", required=True)
     p_viz.add_argument("--out", default="artifacts/pareto.png")
+    _add_db_argument(p_viz)
     p_viz.set_defaults(func=cmd_viz)
 
     return parser
@@ -167,8 +189,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO)
+    if argv is None:
+        argv = sys.argv[1:]
+
+    global_parser = argparse.ArgumentParser(add_help=False)
+    global_parser.add_argument("--db", default=".openevolve/openevolve.db")
+    global_parser.add_argument("--workdir", default=".")
+    global_args, remaining = global_parser.parse_known_args(argv)
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(remaining)
+
+    if getattr(args, "db", None) is None:
+        args.db = global_args.db
+    if getattr(args, "workdir", None) is None:
+        args.workdir = global_args.workdir
+
     args.func(args)
 
 
