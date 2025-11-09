@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 import time
 from statistics import mean
+from collections.abc import Iterable
 from typing import Mapping
 
 from openevolve.sandbox import run_in_sandbox
@@ -32,7 +33,21 @@ def evaluate(source: str) -> Mapping[str, float]:
         start = time.perf_counter()
         result = evolve_sort(payload)
         durations.append((time.perf_counter() - start) * 1000)
-        if list(result) == sorted(dataset):
+
+        # Some implementations mutate the payload in-place and return ``None``.
+        if result is None:
+            candidate_output = payload
+        elif isinstance(result, Iterable):
+            try:
+                candidate_output = list(result)
+            except TypeError:
+                # Guard against objects claiming to be iterable but raising at iteration time.
+                candidate_output = []
+        else:
+            # Non-iterable return values cannot represent a sorted sequence.
+            candidate_output = []
+
+        if candidate_output == sorted(dataset):
             successes += 1
 
     accuracy = successes / len(DATASETS)
