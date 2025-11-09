@@ -9,7 +9,7 @@ from typing import Iterable, Sequence
 
 
 DIFF_BLOCK_RE = re.compile(
-    r"^<<<<<<< SEARCH\n(?P<search>.*?)\n=======\n(?P<replace>.*?)\n>>>>>>> REPLACE\n?",
+    r"<<<<<<< SEARCH\n(?P<search>.*?)\n=======\n(?P<replace>.*?)\n>>>>>>> REPLACE(?:\n|$)",
     re.DOTALL,
 )
 
@@ -32,7 +32,15 @@ class DiffHunk:
 def parse_diff(diff_text: str) -> list[DiffHunk]:
     """Parse diff text into structured hunks."""
 
-    diff_text = diff_text.strip()
+    diff_text = diff_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if diff_text.startswith("```"):
+        lines = diff_text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        diff_text = "\n".join(lines).strip()
+
     if not diff_text:
         raise ValueError("Empty diff text")
 
