@@ -48,9 +48,10 @@ def mutate_meta_prompt(template: str, rng: random.Random | None = None) -> str:
         ("prefer small diffs", "Limit edits to the most relevant EVOLVE blocks and avoid broad refactors."),
     ]
     directive, text = rng.choice(tweaks)
-    if directive in template:
+    existing = {line.strip() for line in template.splitlines()}
+    if text.strip() in existing:
         return template
-    return template + "\n" + text
+    return template.rstrip() + "\n" + text
 
 
 def evolve_meta_prompts(db: ProgramDB, contributions: dict[str, list[str]]) -> None:
