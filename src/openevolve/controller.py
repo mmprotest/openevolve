@@ -111,7 +111,7 @@ class EvolutionController:
             )
             prompt = build_prompt(
                 task_description=task.description,
-                block_source=current_block.content,
+                block_source=current_block.normalized_content,
             )
             try:
                 request_model = chosen_model or self._model
@@ -143,7 +143,7 @@ class EvolutionController:
                 try:
                     validate_model_response(diff_text)
                     hunks = parse_diff(diff_text)
-                    new_source = apply_diff(prompt_block.content, hunks)
+                    new_source = apply_diff(prompt_block.normalized_content, hunks)
                 except ValueError:
                     self._logger.warning(
                         "Candidate %s in round %s discarded: invalid diff",  # noqa: G004
@@ -170,6 +170,30 @@ class EvolutionController:
                     )
                     continue
 
+                if task.scoring is not None:
+                    candidate_score = task.scoring(metrics)
+                    self._logger.info(
+                        "Candidate %s in round %s scored %.4f (best=%.4f)",  # noqa: G004
+                        candidate_index,
+                        round_index + 1,
+                        candidate_score,
+                        best_score,
+                    )
+                else:
+                    score_counter += 1.0
+                    candidate_score = score_counter
+
+                if candidate_score <= best_score:
+                    if task.scoring is not None:
+                        self._logger.info(
+                            "Candidate %s in round %s rejected: score %.4f <= %.4f",  # noqa: G004
+                            candidate_index,
+                            round_index + 1,
+                            candidate_score,
+                            best_score,
+                        )
+                    continue
+
                 if stop_immediately:
                     self._logger.info(
                         "Accepting first viable candidate %s in round %s",  # noqa: G004
@@ -178,20 +202,6 @@ class EvolutionController:
                     )
                     task.program_path.write_text(updated_program)
                     return metrics
-
-                if task.scoring is not None:
-                    candidate_score = task.scoring(metrics)
-                else:
-                    score_counter += 1.0
-                    candidate_score = score_counter
-
-                self._logger.info(
-                    "Candidate %s in round %s scored %.4f (best=%.4f)",  # noqa: G004
-                    candidate_index,
-                    round_index + 1,
-                    candidate_score,
-                    best_score,
-                )
 
                 if candidate_score > best_score:
                     best_score = candidate_score
