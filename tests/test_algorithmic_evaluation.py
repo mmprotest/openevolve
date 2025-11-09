@@ -1,7 +1,7 @@
 """Tests for the algorithmic optimisation evaluation harness."""
-
 from __future__ import annotations
 
+import logging
 import sys
 import textwrap
 from pathlib import Path
@@ -67,3 +67,24 @@ def test_evaluate_accepts_generator_result() -> None:
     metrics = evaluate(source)
 
     assert metrics["accuracy"] == 1.0
+
+
+def test_evaluate_logs_contract_violation(caplog) -> None:
+    """Returning ``None`` surfaces a debug log to aid troubleshooting."""
+
+    source = textwrap.dedent(
+        """
+        from typing import Iterable
+
+
+        def evolve_sort(values: Iterable[int]):
+            values.sort()
+            return None
+        """
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="tasks.algorithmic_optimization.evaluate"):
+        metrics = evaluate(source)
+
+    assert metrics["accuracy"] == 0.0
+    assert "contract violation" in caplog.text
