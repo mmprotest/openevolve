@@ -134,6 +134,7 @@ async def evolve(run_id: str, cfg: dict, llm_call: Callable[[str], str]) -> None
                 metrics=list(metrics_cfg.keys()),
                 sampler_cfg=sampler_cfg,
                 meta_prompt_template=meta["template"],
+                metric_directions=metrics_bool,
             )
             prompt_path = gen_dir / f"candidate_{member:02d}_prompt.txt"
             prompt_path.write_text(prompt, encoding="utf-8")

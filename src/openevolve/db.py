@@ -100,9 +100,10 @@ class ProgramDB:
             self._conn.commit()
 
     def _fetchall(self, query: str, params: Iterable) -> list[sqlite3.Row]:
-        cur = self._conn.execute(query, params)
-        rows = cur.fetchall()
-        cur.close()
+        with self._lock:
+            cur = self._conn.execute(query, params)
+            rows = cur.fetchall()
+            cur.close()
         return rows
 
     def get_candidates_by_run(self, run_id: str, gen: int | None = None) -> list[dict]:
@@ -120,6 +121,8 @@ class ProgramDB:
         return [dict(row) for row in rows]
 
     def _candidate_metrics(self, run_id: str, metrics: list[str]) -> dict[str, dict[str, float]]:
+        if not metrics:
+            return {}
         placeholders = ",".join("?" for _ in metrics)
         query = (
             "SELECT cand_id, metric, value FROM evaluations"
@@ -127,11 +130,13 @@ class ProgramDB:
             f" AND metric IN ({placeholders})"
         )
         params: tuple[object, ...] = (run_id, *metrics)
-        cur = self._conn.execute(query, params)
+        rows = self._fetchall(query, params)
         table: dict[str, dict[str, float]] = {}
-        for cand_id, metric, value in cur.fetchall():
+        for row in rows:
+            cand_id = row["cand_id"] if isinstance(row, sqlite3.Row) else row[0]
+            metric = row["metric"] if isinstance(row, sqlite3.Row) else row[1]
+            value = row["value"] if isinstance(row, sqlite3.Row) else row[2]
             table.setdefault(cand_id, {})[metric] = value
-        cur.close()
         return table
 
     def top_candidates(
@@ -139,6 +144,8 @@ class ProgramDB:
     ) -> list[dict]:
         cands = self.get_candidates_by_run(run_id)
         if not cands:
+            return []
+        if not metrics:
             return []
         evals = self._candidate_metrics(run_id, metrics)
         scored: list[tuple[float, dict]] = []
@@ -206,18 +213,20 @@ class ProgramDB:
             self._conn.commit()
 
     def get_meta_prompts(self, limit: int) -> list[dict]:
-        cur = self._conn.execute(
-            "SELECT * FROM meta_prompts ORDER BY fitness DESC, last_used DESC LIMIT ?",
-            (limit,),
-        )
-        rows = [dict(row) for row in cur.fetchall()]
-        cur.close()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM meta_prompts ORDER BY fitness DESC, last_used DESC LIMIT ?",
+                (limit,),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+            cur.close()
         return rows
 
     def get_run(self, run_id: str) -> dict | None:
-        cur = self._conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
-        row = cur.fetchone()
-        cur.close()
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
+            row = cur.fetchone()
+            cur.close()
         if not row:
             return None
         data = dict(row)
@@ -233,23 +242,38 @@ class ProgramDB:
         query = (
             f"SELECT cand_id, metric, value FROM evaluations WHERE cand_id IN ({placeholders})"
         )
-        cur = self._conn.execute(query, tuple(cand_list))
-        table: dict[str, dict[str, float]] = {}
-        for cand_id, metric, value in cur.fetchall():
-            table.setdefault(cand_id, {})[metric] = value
-        cur.close()
+        with self._lock:
+            cur = self._conn.execute(query, tuple(cand_list))
+            table: dict[str, dict[str, float]] = {}
+            for cand_id, metric, value in cur.fetchall():
+                table.setdefault(cand_id, {})[metric] = value
+            cur.close()
         return table
 
+    def get_recent_failures(self, run_id: str, limit: int) -> list[dict]:
+        if limit <= 0:
+            return []
+        query = (
+            "SELECT c.cand_id, c.patch, e.error FROM candidates c "
+            "JOIN evaluations e ON e.cand_id = c.cand_id "
+            "WHERE c.run_id = ? AND e.passed = 0 "
+            "ORDER BY e.created_at DESC LIMIT ?"
+        )
+        rows = self._fetchall(query, (run_id, limit))
+        return [dict(row) for row in rows]
+
     def get_candidate(self, cand_id: str) -> dict | None:
-        cur = self._conn.execute("SELECT * FROM candidates WHERE cand_id = ?", (cand_id,))
-        row = cur.fetchone()
-        cur.close()
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM candidates WHERE cand_id = ?", (cand_id,))
+            row = cur.fetchone()
+            cur.close()
         return dict(row) if row else None
 
     def list_meta_prompts(self) -> list[dict]:
-        cur = self._conn.execute("SELECT * FROM meta_prompts ORDER BY fitness DESC")
-        rows = [dict(row) for row in cur.fetchall()]
-        cur.close()
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM meta_prompts ORDER BY fitness DESC")
+            rows = [dict(row) for row in cur.fetchall()]
+            cur.close()
         return rows
 
     def close(self) -> None:

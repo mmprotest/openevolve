@@ -53,11 +53,14 @@ def build_prompt(
     metrics: list[str],
     sampler_cfg: dict,
     meta_prompt_template: str,
+    *,
+    metric_directions: dict[str, bool] | None = None,
 ) -> str:
     """Construct a long-context prompt describing run context and expectations."""
 
     all_candidates = db.get_candidates_by_run(run_id)
-    minimize = {m: False for m in metrics}
+    directions = metric_directions or {m: True for m in metrics}
+    minimize = {m: not directions.get(m, True) for m in metrics}
     elites = db.top_candidates(
         run_id,
         sampler_cfg.get("elites_k", 4),
@@ -65,7 +68,10 @@ def build_prompt(
         minimize,
     )
 
-    archive = Archive(capacity=256, metrics={m: True for m in metrics})
+    archive = Archive(
+        capacity=256,
+        metrics={m: directions.get(m, True) for m in metrics},
+    )
     evals = db.get_candidate_evals(cand["cand_id"] for cand in all_candidates)
     archive.update(all_candidates, evals)
     novelty_ids = archive.sample_mixture(0, sampler_cfg.get("novel_m", 4), 0)
@@ -73,17 +79,7 @@ def build_prompt(
     novelty = [novelty_lookup[i] for i in novelty_ids if i in novelty_lookup]
 
     failure_count = sampler_cfg.get("include_failures", 2)
-    failures: list[dict] = []
-    if failure_count:
-        cur = db._conn.execute(
-            "SELECT c.cand_id, c.patch, e.error FROM candidates c"
-            " JOIN evaluations e ON e.cand_id = c.cand_id"
-            " WHERE e.passed = 0 ORDER BY e.created_at DESC LIMIT ?",
-            (failure_count,),
-        )
-        for row in cur.fetchall():
-            failures.append({"cand_id": row["cand_id"], "patch": row["patch"], "error": row["error"]})
-        cur.close()
+    failures = db.get_recent_failures(run_id, int(failure_count)) if failure_count else []
 
     sections = deque()
     sections.append(
