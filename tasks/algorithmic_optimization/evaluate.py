@@ -34,10 +34,7 @@ def evaluate(source: str) -> Mapping[str, float]:
         result = evolve_sort(payload)
         durations.append((time.perf_counter() - start) * 1000)
 
-        # Some implementations mutate the payload in-place and return ``None``.
-        if result is None:
-            candidate_output = payload
-        elif isinstance(result, Iterable):
+        if isinstance(result, Iterable):
             try:
                 candidate_output = list(result)
             except TypeError:
@@ -45,6 +42,11 @@ def evaluate(source: str) -> Mapping[str, float]:
                 candidate_output = []
         else:
             # Non-iterable return values cannot represent a sorted sequence.
+            candidate_output = []
+
+        if result is None:
+            # ``evolve_sort`` is expected to return the sorted sequence; returning ``None``
+            # indicates the contract was violated even if the input list was mutated.
             candidate_output = []
 
         if candidate_output == sorted(dataset):
