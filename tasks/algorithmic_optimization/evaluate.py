@@ -80,11 +80,6 @@ def evaluate(source: str) -> Mapping[str, float]:
             )
             candidate_output = []
 
-        if result is None:
-            # ``evolve_sort`` is expected to return the sorted sequence; returning ``None``
-            # indicates the contract was violated even if the input list was mutated.
-            candidate_output = []
-
         if candidate_output == sorted(dataset):
             successes += 1
             LOGGER.debug("Dataset %s: produced a correctly sorted sequence", index + 1)

@@ -94,7 +94,7 @@ def test_stop_on_first_requires_improvement(tmp_path) -> None:
         """
     ).strip()
 
-    client = _FakeClient([[bad_diff, good_diff]])
+    client = _FakeClient([[bad_diff], [good_diff]])
 
     task = EvolutionTask(
         name="demo",
@@ -116,4 +116,4 @@ def test_stop_on_first_requires_improvement(tmp_path) -> None:
     assert metrics["accuracy"] == pytest.approx(1.0)
     blocks = extract_blocks(program_path.read_text())
     assert "return sorted(values)" in blocks[0].content
-    assert client.calls == 1
+    assert client.calls == 2
