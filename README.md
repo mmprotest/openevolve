@@ -136,6 +136,21 @@ Pareto optimisation across **accuracy**, **execution time**, and **code length**
    Use `openevolve resume --run-id algo-demo` to continue training, or copy the run
    directory and database entries to start a new variant with tweaked parameters.
 
+### Verbose logging and troubleshooting
+
+- Pass `--debug` to `examples/algorithmic_optimization.py` (or set `--log-level DEBUG`)
+  to emit per-dataset diagnostics from both the evolution controller and the evaluation
+  harness:
+  ```bash
+  python examples/algorithmic_optimization.py --debug
+  ```
+  The evaluator logs how each dataset was processed, the shape of the returned iterable,
+  and whether the candidate satisfied the sorting contract—ideal for tracking down
+  regressions when a run stalls.
+- Implementations of `evolve_sort` **must return** the sorted sequence (for example by
+  returning the mutated list). Returning `None` is treated as a contract violation and is
+  now surfaced explicitly in the debug logs.
+
 ---
 
 ## Using your own (or a local) OpenAI-compatible model
