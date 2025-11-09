@@ -89,6 +89,14 @@ def _parse_args() -> argparse.Namespace:
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
         help="Logging level for the evolution controller (default: INFO).",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "Enable verbose debug logging for the evolution controller and the evaluator. "
+            "Equivalent to setting --log-level DEBUG."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -111,10 +119,15 @@ def _score_metrics(metrics: Mapping[str, float]) -> float:
 def main() -> None:
     args = _parse_args()
 
+    log_level_name = "DEBUG" if args.debug else args.log_level.upper()
     logging.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logging.INFO),
+        level=getattr(logging, log_level_name, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if args.debug:
+        logging.getLogger("openevolve").setLevel(logging.DEBUG)
+        logging.getLogger("tasks.algorithmic_optimization").setLevel(logging.DEBUG)
+        logging.getLogger("tasks.algorithmic_optimization.evaluate").setLevel(logging.DEBUG)
 
     baseline_source = PROGRAM_PATH.read_text(encoding="utf-8")
     baseline_metrics = evaluate(baseline_source)

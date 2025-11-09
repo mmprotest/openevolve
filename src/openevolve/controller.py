@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,21 +117,24 @@ class EvolutionController:
             try:
                 request_model = chosen_model or self._model
                 self._logger.debug(
-                    "Invoking language model (model=%s, temperature=%.2f, n=%s)",
+                    "Invoking language model (model=%s, temperature=%.2f, requests=%s)",
                     request_model,
                     chosen_temperature,
                     num_candidates,
                 )
-                result = await self.client.generate(
+                candidate_diffs = await self._generate_candidates(
                     prompt=prompt,
                     system=system,
                     model=request_model,
-                    n=num_candidates,
                     temperature=chosen_temperature,
                     extra_messages=extra_messages,
+                    num_requests=num_candidates,
                 )
+                if not candidate_diffs:
+                    self._logger.warning("Language model returned no usable candidates")
+                    continue
                 self._logger.debug(
-                    "Received %s candidate(s) from language model", len(result.candidates)
+                    "Received %s candidate(s) from language model", len(candidate_diffs)
                 )
             except Exception:  # noqa: BLE001
                 self._logger.exception("Language model request failed; aborting evolution round")
@@ -139,7 +143,7 @@ class EvolutionController:
             prompt_source = current_source
             prompt_block = current_block
 
-            for candidate_index, diff_text in enumerate(result.candidates, start=1):
+            for candidate_index, diff_text in enumerate(candidate_diffs, start=1):
                 try:
                     validate_model_response(diff_text)
                     hunks = parse_diff(diff_text)
@@ -229,3 +233,40 @@ class EvolutionController:
         self._logger.info("Evolution completed with improved program")
         task.program_path.write_text(best_program)
         return best_metrics
+
+    async def _generate_candidates(
+        self,
+        *,
+        prompt: str,
+        system: str,
+        model: str | None,
+        temperature: float,
+        extra_messages: Sequence[dict[str, Any]] | None,
+        num_requests: int,
+    ) -> list[str]:
+        """Collect diff candidates, falling back to repeated single completions."""
+
+        tasks = [
+            self.client.generate(
+                prompt=prompt,
+                system=system,
+                model=model,
+                n=1,
+                temperature=temperature,
+                extra_messages=extra_messages,
+            )
+            for _ in range(max(1, num_requests))
+        ]
+
+        candidates: list[str] = []
+        for index, result in enumerate(
+            await asyncio.gather(*tasks, return_exceptions=True), start=1
+        ):
+            if isinstance(result, Exception):
+                self._logger.exception(
+                    "Language model request %s/%s failed", index, len(tasks)
+                )
+                continue
+            candidates.extend(result.candidates)
+
+        return candidates
