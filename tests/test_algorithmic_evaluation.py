@@ -13,8 +13,8 @@ if str(ROOT) not in sys.path:
 from tasks.algorithmic_optimization.evaluate import evaluate
 
 
-def test_evaluate_accepts_inplace_sort_returning_none() -> None:
-    """Implementations that sort in-place but return ``None`` should pass."""
+def test_evaluate_rejects_inplace_sort_returning_none() -> None:
+    """Implementations must return the sorted sequence rather than ``None``."""
 
     source = textwrap.dedent(
         """
@@ -24,6 +24,25 @@ def test_evaluate_accepts_inplace_sort_returning_none() -> None:
         def evolve_sort(values: Iterable[int]):
             values.sort()
             # Implicit ``None`` return mirrors ``list.sort`` semantics.
+        """
+    )
+
+    metrics = evaluate(source)
+
+    assert metrics["accuracy"] == 0.0
+
+
+def test_evaluate_accepts_inplace_sort_returning_sequence() -> None:
+    """In-place algorithms that return the mutated list should still pass."""
+
+    source = textwrap.dedent(
+        """
+        from typing import Iterable
+
+
+        def evolve_sort(values: Iterable[int]):
+            values.sort()
+            return values
         """
     )
 
